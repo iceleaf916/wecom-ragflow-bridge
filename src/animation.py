@@ -1,33 +1,35 @@
 """动画效果模块"""
 
 import asyncio
-import json
 import logging
+from collections.abc import Awaitable, Callable
+
 from protocol import MessageBuilder
 
-logger= logging.getLogger("wecom-RAGFLOW-bridge")
-async def animate_waiting(ws, req_id: str, stream_id: str, timeout: int = 100):
-    """等待回复动画效果，超时后发送提示并退出"""
-    frames = ["", ".", "..", "..."]
-    index = 0
-    elapsed = 0
-    interval = 1
-    while True:
-        try:
-            content = f"正在处理，请稍候 {frames[index]}"
-            msg = MessageBuilder.build_waiting(req_id, stream_id, content)
-            await ws.send(json.dumps(msg))
-            index = (index + 1) % 4
-            await asyncio.sleep(interval)
-            if index == 0:
-                logger.info(f"等待动画: req_id={req_id}, stream_id={stream_id}, elapsed={elapsed}s")
-            elapsed += interval
-            if elapsed >= timeout:
-                msg = MessageBuilder.build_waiting(req_id, stream_id, "处理时间较长，请稍候...")
-                await ws.send(json.dumps(msg))
-                break
-        except asyncio.CancelledError:
-            break
-        except Exception:
-            break
-3
+logger = logging.getLogger("wecom-RAGFLOW-bridge")
+
+
+async def animate_waiting(
+    send_message: Callable[[dict], Awaitable[None]],
+    req_id: str,
+    stream_id: str,
+    timeout: int = 300,
+):
+    """发送企微原生思考动画，并等待最终回复关闭同一条流。
+
+    OpenClaw 使用 ``<think></think>`` 作为首帧、``finish=false``，企微客户端
+    会将其渲染为原生思考动画。这里不再发送可见的“正在思考”文本，也不发送
+    普通文本消息；最终回复必须复用同一个 stream_id 并设置 finish=true。
+    """
+    try:
+        await send_message(MessageBuilder.build_thinking(req_id, stream_id))
+        await asyncio.sleep(timeout)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "发送企微原生思考动画失败: req_id=%s, stream_id=%s, error=%s",
+            req_id,
+            stream_id,
+            exc,
+        )

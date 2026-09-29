@@ -49,6 +49,7 @@ def create_chat_client(config, http_session: aiohttp.ClientSession) -> ChatClien
             config.ragflow_api_base,
             config.ragflow_api_key,
             config.ragflow_agent_id,
+            config.ragflow_endpoint,
         )
     if provider == "dify":
         from dify_client import DifyClient

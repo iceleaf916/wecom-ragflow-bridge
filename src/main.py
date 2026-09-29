@@ -336,12 +336,6 @@ class WeComRAGFLOWBridge:
 
             total_elapsed = (time.time() - total_start) * 1000
             logger.info(f"Message handled: {total_elapsed:.2f}ms")
-            total_msg = MessageBuilder.build_stream_message(
-                req_id, uuid.uuid4().hex[:16],
-                f"\n\nElapsed: {total_elapsed:.0f}ms",
-                finish=True
-            )
-            await self.safe_ws_send(total_msg)
         except Exception as e:
             logger.error(f"Reply message failed: {e}", exc_info=True)
             msg = MessageBuilder.build_error(req_id)
@@ -351,12 +345,9 @@ class WeComRAGFLOWBridge:
         """Send streaming reply."""
         stream_id = uuid.uuid4().hex[:16]
         accumulated_text = ""
-        chunk_count = 0
 
-        # 
-        animation_task = asyncio.create_task(animate_waiting(self._ws, req_id, stream_id))
-        #msg = MessageBuilder.build_waiting(req_id, stream_id, "?..")
-        #await self._ws.send(json.dumps(msg))
+        # 首帧使用企微原生思考动画；最终回复必须复用该 stream_id。
+        animation_task = asyncio.create_task(animate_waiting(self.safe_ws_send, req_id, stream_id))
 
         try:
             conv_key = f"{chat_id}:{user_id}"
@@ -368,13 +359,6 @@ class WeComRAGFLOWBridge:
                 if event_data.event == "message":
                     content = event_data.content
                     accumulated_text += content
-                    chunk_count += 1
-                    if chunk_count == 1 or chunk_count % 5 == 0 :
-                        if not animation_task.cancelled():
-                            animation_task.cancel()
-                        msg = MessageBuilder.build_stream_message(req_id, stream_id, accumulated_text)
-                        await self.safe_ws_send(msg)
-                        logger.info(f"? req_id={req_id}, chunk_count={chunk_count}, stream_id={stream_id}, ={len(accumulated_text)}")
 
                 elif event_data.event == "message_end":
                     new_conv_id = event_data.conversation_id
@@ -387,8 +371,13 @@ class WeComRAGFLOWBridge:
                     logger.error(f": {error_msg}")
                     accumulated_text += f"\n\n[: {error_msg}]"
 
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("流式回复失败", exc_info=True)
+            accumulated_text = "，。"
+
         finally:
-            
             animation_task.cancel()
             try:
                 await animation_task
@@ -407,8 +396,9 @@ class WeComRAGFLOWBridge:
     async def _reply_blocking(self, req_id: str, chat_id: str, user_id: str, message: str, image_data: Optional[bytes] = None):
         """Send blocking reply."""
         stream_id = uuid.uuid4().hex[:16]
-        animation_task = asyncio.create_task(animate_waiting(self._ws, req_id, stream_id))
+        animation_task = asyncio.create_task(animate_waiting(self.safe_ws_send, req_id, stream_id))
         conv_key = f"{chat_id}:{user_id}"
+        answer = ""
         try:
             conv_id = self._sessions.get_conversation_id(conv_key)
             answer, new_conv_id = await self._chat_client.chat_blocking(message, user_id, conv_id, image_data)
@@ -416,6 +406,11 @@ class WeComRAGFLOWBridge:
             if new_conv_id !=  conv_id:
                 logger.info(f"Update conversation mapping {conv_key}: {conv_id} -> {new_conv_id}")
                 self._sessions.set_conversation_id(conv_key, new_conv_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.error("阻塞式回复失败", exc_info=True)
+            answer = "，。"
         finally:
             animation_task.cancel()
             try:
@@ -457,4 +452,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

@@ -154,27 +154,20 @@ def direct_chat_completion(
 
 def main():
     """主函数，用于测试"""
-    question ="证券主表的作用是?"
-    if len(question) > 1:
-        #question = sys.argv[1]
-        
-        # 从环境变量获取配置
-        base_url ="http://qq5273175.dsmynas.com:18002"       
-        api_token="ragflow-CazklDyMsBQcEu-VMsanOqPSl_KZD71IL6Hick1kx7U"
-        agent_id="456d17c026ac11f1a9876f7f200b1a45"
-        stream_mode = True
-        #base_url = os.environ.get('RAGFLOW_BASE_URL')
-        #api_token = os.environ.get('RAGFLOW_API_TOKEN')
-        #agent_id = os.environ.get('RAGFLOW_AGENT_ID')
-        #stream_mode = os.environ.get('RAGFLOW_STREAM_MODE', 'true').lower() == 'true'
-        
+    question = sys.argv[1] if len(sys.argv) > 1 else ""
+    if question:
+        base_url = os.environ.get("RAGFLOW_BASE_URL", "")
+        api_token = os.environ.get("RAGFLOW_API_TOKEN", "")
+        agent_id = os.environ.get("RAGFLOW_AGENT_ID", "")
+        stream_mode = os.environ.get("RAGFLOW_STREAM_MODE", "true").lower() == "true"
+
         if not all([base_url, api_token, agent_id]):
             print("错误: 请设置环境变量 RAGFLOW_BASE_URL, RAGFLOW_API_TOKEN, RAGFLOW_AGENT_ID")
             sys.exit(1)
-        
+
         print(f"问题: {question}")
         print("=" * 50)
-        
+
         if stream_mode:
             print("流式回答:")
             for chunk in stream_chat_completion(base_url, api_token, agent_id, question):
@@ -192,7 +185,6 @@ def main():
         print("  - RAGFLOW_API_TOKEN: API访问令牌")
         print("  - RAGFLOW_AGENT_ID: 智能体ID")
         print("  - RAGFLOW_STREAM_MODE: 是否使用流式模式 (true/false)")
-
 
 if __name__ == "__main__":
     main()

@@ -4,6 +4,10 @@ import json
 import uuid
 
 
+# 企业微信会把这个特殊的流式占位内容渲染为原生“思考中”动画。
+THINKING_MESSAGE = "<think></think>"
+
+
 class WeComCmd:
     """企业微信命令类型"""
     SUBSCRIBE = "aibot_subscribe"
@@ -70,6 +74,11 @@ class MessageBuilder:
     @staticmethod
     def build_waiting(req_id: str, stream_id: str, content: str) -> dict:
         return MessageBuilder.build_stream_message(req_id, stream_id, content, finish=False)
+
+    @staticmethod
+    def build_thinking(req_id: str, stream_id: str) -> dict:
+        """开始企业微信原生思考流。"""
+        return MessageBuilder.build_waiting(req_id, stream_id, THINKING_MESSAGE)
 
     @staticmethod
     def build_error(req_id: str, content: str = "抱歉，处理消息时出现了错误，请稍后重试。") -> dict:

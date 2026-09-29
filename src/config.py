@@ -96,6 +96,7 @@ class Config:
     ragflow_api_base: str = field(default_factory=lambda: os.environ.get("RAGFLOW_API_BASE", "http://localhost/v1"))
     ragflow_api_key: str = field(default_factory=lambda: os.environ.get("RAGFLOW_API_KEY", ""))
     ragflow_agent_id: str = field(default_factory=lambda: os.environ.get("RAGFLOW_AGENT_ID", ""))
+    ragflow_endpoint: str = field(default_factory=lambda: os.environ.get("RAGFLOW_ENDPOINT", "agent").lower())
     dify_api_base: str = field(default_factory=lambda: os.environ.get("DIFY_API_BASE", "http://localhost/v1"))
     dify_api_key: str = field(default_factory=lambda: os.environ.get("DIFY_API_KEY", ""))
     mineru_api_base: str = field(default_factory=lambda: os.environ.get("MINERU_API_BASE", "https://mineru.net"))
@@ -171,8 +172,10 @@ class Config:
             errors.append("missing environment variable RAGFLOW_API_KEY")
         if self.chat_provider == "ragflow" and not self.ragflow_agent_id:
             errors.append("missing environment variable RAGFLOW_AGENT_ID")
+        if self.chat_provider == "ragflow" and self.ragflow_endpoint not in ("agent", "chat"):
+            errors.append("RAGFLOW_ENDPOINT only supports agent or chat")
         if self.chat_provider == "dify" and not self.dify_api_key:
             errors.append("missing environment variable DIFY_API_KEY")
-        if (self.wecom_bot_enabled or self.wecom_kf_enabled) and not self.wecom_corp_id:
+        if self.wecom_kf_enabled and not self.wecom_corp_id:
             errors.append("missing environment variable WECOM_CORP_ID")
         return errors

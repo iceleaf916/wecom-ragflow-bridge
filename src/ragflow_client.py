@@ -24,12 +24,13 @@ def _encode_image(image_data: bytes) -> str:
 class RAGFLOWClient:
     """RAGFLOW API 调用封装"""
 
-    def __init__(self, http_session: aiohttp.ClientSession, base_url: str, api_key: str, agent_id: str):
+    def __init__(self, http_session: aiohttp.ClientSession, base_url: str, api_key: str, agent_id: str, endpoint: str = "agent"):
         self._session = http_session
-        self._base_url = base_url
+        self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._agent_id = agent_id
-        self._model = "deepseek-v3"  # 默认模型，可根据需要调整
+        self._endpoint = endpoint
+        self._model = "model"  # 让 RAGFlow 使用聊天助手自身配置的默认模型
 
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
@@ -58,14 +59,24 @@ class RAGFLOWClient:
         user_id: str = "default",
     ) -> AsyncIterator[ChatStreamEvent]:
         """流式聊天请求，支持图片输入"""
-        url = f"{self._base_url}/api/v1/agents_openai/{self._agent_id}/chat/completions"
+        if self._endpoint == "chat":
+            url = f"{self._base_url}/api/v1/chat/completions"
+        else:
+            url = f"{self._base_url}/api/v1/agents_openai/{self._agent_id}/chat/completions"
         logger.info(f"流式请求url: {url}, 含图片: {image_data is not None}")
 
         payload = {
-            "model": self._model,
             "messages": self._build_messages(message, image_data),
-            "stream": "true",
+            "stream": True,
         }
+        if self._endpoint == "chat":
+            payload["chat_id"] = self._agent_id
+            if conversation_id:
+                payload["session_id"] = conversation_id
+        else:
+            payload["model"] = self._model
+            if conversation_id:
+                payload["session_id"] = conversation_id
 
         async with self._session.post(url, json=payload, headers=self._headers()) as resp:
             if resp.status != 200:
@@ -92,6 +103,14 @@ class RAGFLOWClient:
                     content = choices[0].get("delta", {}).get("content", "")
                     if content:
                         yield ChatStreamEvent(event="message", content=content)
+                elif isinstance(event_data.get("data"), dict):
+                    data = event_data["data"]
+                    content = data.get("answer", "") or ""
+                    if content:
+                        yield ChatStreamEvent(event="message", content=content)
+                    new_conversation_id = data.get("session_id") or data.get("conversation_id")
+                    if new_conversation_id:
+                        yield ChatStreamEvent(event="message_end", conversation_id=new_conversation_id)
                 elif event_data.get("event") == "message_end":
                     yield ChatStreamEvent(
                         event="message_end",
@@ -110,22 +129,47 @@ class RAGFLOWClient:
         conversation_id: Optional[str] = None,
         image_data: Optional[bytes] = None
     ) -> tuple[str, Optional[str]]:
-        """Todo,API存在错误待修正,阻塞式聊天请求，支持图片输入，返回 (回答, 新会话ID)"""
-        # 注意：chat-messages API 可能不支持图片输入，这里只用文本消息
-        url = f"{self._base_url}/chat-messages"
+        """调用 RAGFlow 非流式接口，返回 (最终回答, 新会话ID)。"""
+        if self._endpoint == "chat":
+            url = f"{self._base_url}/api/v1/chat/completions"
+        else:
+            url = f"{self._base_url}/api/v1/agents_openai/{self._agent_id}/chat/completions"
+
         payload = {
-            "inputs": {},
-            "query": message,
-            "user": user_id,
-            "response_mode": "blocking",
+            "messages": self._build_messages(message, image_data),
+            "stream": False,
         }
-        if conversation_id:
-            payload["conversation_id"] = conversation_id
+        if self._endpoint == "chat":
+            payload["chat_id"] = self._agent_id
+            if conversation_id:
+                payload["session_id"] = conversation_id
+        else:
+            payload["model"] = self._model
+            if conversation_id:
+                payload["session_id"] = conversation_id
 
         async with self._session.post(url, json=payload, headers=self._headers()) as resp:
             if resp.status != 200:
                 error_text = await resp.text()
                 raise RAGFLOWError(f"API 返回 {resp.status}: {error_text[:500]}")
 
-            result = await resp.json()
-            return result.get("answer", "抱歉，我暂时无法回答这个问题。"), result.get("conversation_id")
+            result = await resp.json(content_type=None)
+            if result.get("code", 0) != 0:
+                raise RAGFLOWError(result.get("message", "RAGFlow 返回错误"))
+
+            data = result.get("data", result)
+            if not isinstance(data, dict):
+                raise RAGFLOWError("RAGFlow 返回中没有最终回答")
+
+            answer = data.get("answer", "")
+            if not answer and data.get("choices"):
+                answer = data["choices"][0].get("message", {}).get("content", "")
+            if not answer:
+                answer = "抱歉，我暂时无法回答这个问题。"
+
+            # 兼容旧版本或模型直接返回的 <think>...</think>，只保留最终答案。
+            if "</think>" in answer:
+                answer = answer.rsplit("</think>", 1)[-1]
+            answer = answer.replace("<think>", "").replace("</think>", "").strip()
+            new_conversation_id = data.get("session_id") or data.get("conversation_id")
+            return answer, new_conversation_id
